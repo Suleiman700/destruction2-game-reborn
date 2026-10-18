@@ -1,0 +1,4 @@
+obj/
+dist-debug/
+_removed/
+.DS_Store

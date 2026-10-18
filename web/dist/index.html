@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Destruction II</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  body { display: flex; align-items: center; justify-content: center; font: 14px/1.4 Arial, Helvetica, sans-serif; color: #ccc; }
+  #screen { image-rendering: pixelated; image-rendering: crisp-edges; cursor: none; outline: none; background: #000; }
+  #overlay { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+             gap: 14px; background: #000; cursor: pointer; text-align: center; }
+  #overlay h1 { margin: 0; font-size: 28px; color: #fff; letter-spacing: 1px; }
+  #overlay button { font: inherit; font-size: 16px; padding: 10px 28px; border: 1px solid #666; background: #111; color: #fff; cursor: pointer; }
+  #overlay button:disabled { opacity: .5; cursor: default; }
+  #overlay small { color: #777; max-width: 480px; }
+  #status { min-height: 1.4em; }
+</style>
+</head>
+<body>
+<canvas id="screen" width="800" height="600" tabindex="0"></canvas>
+<div id="overlay">
+  <h1>DESTRUCTION II</h1>
+  <div id="status">Loading…</div>
+  <button id="play" disabled>Click to play</button>
+  <small>Original game © Johan Torp / Nocturnal Development 2001–2003. F12 quits, as in the original. Players, saves and settings are stored in this browser.</small>
+</div>
+<script>
+'use strict';
+(function () {
+  var canvas = document.getElementById('screen');
+  var overlay = document.getElementById('overlay');
+  var statusEl = document.getElementById('status');
+  var playBtn = document.getElementById('play');
+
+  // KeyboardEvent.code -> DirectInput scan code (DIK_*)
+  var DIK = {
+    Escape: 0x01, Digit1: 0x02, Digit2: 0x03, Digit3: 0x04, Digit4: 0x05, Digit5: 0x06, Digit6: 0x07, Digit7: 0x08,
+    Digit8: 0x09, Digit9: 0x0A, Digit0: 0x0B, Minus: 0x0C, Equal: 0x0D, Backspace: 0x0E, Tab: 0x0F,
+    KeyQ: 0x10, KeyW: 0x11, KeyE: 0x12, KeyR: 0x13, KeyT: 0x14, KeyY: 0x15, KeyU: 0x16, KeyI: 0x17, KeyO: 0x18, KeyP: 0x19,
+    BracketLeft: 0x1A, BracketRight: 0x1B, Enter: 0x1C, ControlLeft: 0x1D,
+    KeyA: 0x1E, KeyS: 0x1F, KeyD: 0x20, KeyF: 0x21, KeyG: 0x22, KeyH: 0x23, KeyJ: 0x24, KeyK: 0x25, KeyL: 0x26,
+    Semicolon: 0x27, Quote: 0x28, Backquote: 0x29, ShiftLeft: 0x2A, Backslash: 0x2B,
+    KeyZ: 0x2C, KeyX: 0x2D, KeyC: 0x2E, KeyV: 0x2F, KeyB: 0x30, KeyN: 0x31, KeyM: 0x32,
+    Comma: 0x33, Period: 0x34, Slash: 0x35, ShiftRight: 0x36, NumpadMultiply: 0x37, AltLeft: 0x38, Space: 0x39,
+    CapsLock: 0x3A, F1: 0x3B, F2: 0x3C, F3: 0x3D, F4: 0x3E, F5: 0x3F, F6: 0x40, F7: 0x41, F8: 0x42, F9: 0x43, F10: 0x44,
+    NumLock: 0x45, ScrollLock: 0x46, Numpad7: 0x47, Numpad8: 0x48, Numpad9: 0x49, NumpadSubtract: 0x4A,
+    Numpad4: 0x4B, Numpad5: 0x4C, Numpad6: 0x4D, NumpadAdd: 0x4E, Numpad1: 0x4F, Numpad2: 0x50, Numpad3: 0x51,
+    Numpad0: 0x52, NumpadDecimal: 0x53, IntlBackslash: 0x56, F11: 0x57, F12: 0x58,
+    NumpadEnter: 0x9C, ControlRight: 0x9D, NumpadDivide: 0xB5, PrintScreen: 0xB7, AltRight: 0xB8, Pause: 0xC5,
+    Home: 0xC7, ArrowUp: 0xC8, PageUp: 0xC9, ArrowLeft: 0xCB, ArrowRight: 0xCD, End: 0xCF, ArrowDown: 0xD0,
+    PageDown: 0xD1, Insert: 0xD2, Delete: 0xD3, MetaLeft: 0xDB, MetaRight: 0xDC, ContextMenu: 0xDD
+  };
+  var VK_F12 = 0x7B;
+
+  function fit() {
+    var s = Math.min(window.innerWidth / 800, window.innerHeight / 600);
+    if (s >= 1) s = Math.floor(s * 4) / 4;  // keep pixels sharp at common sizes
+    canvas.style.width = Math.round(800 * s) + 'px';
+    canvas.style.height = Math.round(600 * s) + 'px';
+  }
+  window.addEventListener('resize', fit);
+  fit();
+
+  var started = false, exited = false;
+  var debug = /[?&]debug/.test(location.search);
+  function dbg() { if (debug) console.log.apply(console, ['[d2]'].concat([].slice.call(arguments))); }
+
+  function startAudio() {
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    var ctx = new AC();
+    var frames = 2048;
+    var node = ctx.createScriptProcessor(frames, 0, 2);
+    var bufL = Module._malloc(frames * 4), bufR = Module._malloc(frames * 4);
+    node.onaudioprocess = function (e) {
+      var out = e.outputBuffer, n = out.length;
+      if (exited) { out.getChannelData(0).fill(0); out.getChannelData(1).fill(0); return; }
+      Module._d2_mix(bufL, bufR, n, ctx.sampleRate);
+      out.getChannelData(0).set(Module.HEAPF32.subarray(bufL >> 2, (bufL >> 2) + n));
+      out.getChannelData(1).set(Module.HEAPF32.subarray(bufR >> 2, (bufR >> 2) + n));
+      if (debug) { var d0 = out.getChannelData(0), d1 = out.getChannelData(1); for (var i = 0; i < n; i++) { var a = Math.abs(d0[i]), b = Math.abs(d1[i]); if (a > Module.d2PeakL) Module.d2PeakL = a; if (b > Module.d2PeakR) Module.d2PeakR = b; } }
+    };
+    node.connect(ctx.destination);
+    ctx.resume();
+    Module.d2Audio = ctx;
+    Module.d2PeakL = Module.d2PeakR = 0;
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) ctx.resume(); });
+  }
+
+  function keyHandler(down) {
+    return function (e) {
+      if (!started || exited) return;
+      var dik = DIK[e.code];
+      if (dik === undefined) return;
+      // Keep the browser from scrolling or switching focus; leave browser shortcuts with modifiers alone.
+      if (!(e.metaKey || (e.ctrlKey && e.code !== 'ControlLeft' && e.code !== 'ControlRight'))) e.preventDefault();
+      if (down && e.repeat) return;
+      dbg('key', e.code, down);
+      Module._d2_key(dik, down ? 1 : 0, e.code === 'F12' ? VK_F12 : 0);
+    };
+  }
+  window.addEventListener('keydown', keyHandler(true));
+  window.addEventListener('keyup', keyHandler(false));
+  window.addEventListener('blur', function () { dbg('blur'); if (started && !exited) Module._d2_focus(0); });
+  window.addEventListener('focus', function () { dbg('focus'); if (started && !exited) Module._d2_focus(1); });
+  document.addEventListener('visibilitychange', function () {
+    if (!started || exited) return;
+    dbg('visibility', document.hidden, document.hasFocus());
+    Module._d2_focus(document.hidden ? 0 : (document.hasFocus() ? 1 : 0));
+  });
+  canvas.addEventListener('mousedown', function () { canvas.focus(); if (started && !exited) Module._d2_focus(1); });
+
+  playBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    if (started) return;
+    started = true;
+    overlay.style.display = 'none';
+    canvas.focus();
+    startAudio();
+    Module.callMain([]);
+  });
+
+  window.Module = {
+    canvas: canvas,
+    noInitialRun: true,
+    d2FrameBudget: 10,
+    preRun: [function () {
+      // Players, saves and settings persist in IndexedDB.
+      Module.FS.mkdir("/home/d2");
+      Module.FS.mount(Module.FS.filesystems.IDBFS, {}, "/home/d2");
+      Module.addRunDependency('d2-idbfs');
+      Module.FS.syncfs(true, function (err) {
+        if (err) console.error('Destruction II: could not load saved data', err);
+        Module.removeRunDependency('d2-idbfs');
+      });
+    }],
+    onRuntimeInitialized: function () {
+      statusEl.textContent = '';
+      playBtn.disabled = false;
+    },
+    setStatus: function (t) { if (!started) statusEl.textContent = t ? t.replace(/\(\d+\/\d+\)/, '') : ''; },
+    onGameExit: function () {
+      exited = true;
+      if (Module.d2Audio) Module.d2Audio.suspend();
+      overlay.style.display = 'flex';
+      overlay.querySelector('h1').textContent = 'DESTRUCTION II';
+      statusEl.textContent = 'The game has exited.';
+      playBtn.textContent = 'Restart';
+      playBtn.disabled = false;
+      playBtn.onclick = function () { location.reload(); };
+    },
+    printErr: function (t) { console.warn(t); }
+  };
+  var s = document.createElement('script');
+  s.src = 'd2.js';
+  s.onerror = function () { statusEl.textContent = 'Failed to load the game files.'; };
+  document.body.appendChild(s);
+})();
+</script>
+</body>
+</html>

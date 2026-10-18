@@ -1,0 +1,1 @@
+enum StopReason : int{HaventStopped, StopDistanceReached, LockSpeedZero, RegularSpeedZero, IsTrapped, NumberOfStopReasons};
