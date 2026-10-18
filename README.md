@@ -94,4 +94,4 @@ This is an unofficial fan project, not affiliated with or endorsed by Nocturnal 
 ## Credits
 
 - **Destruction II** — code, graphics and sound by Johan Torp, Nocturnal Development.
-- **Web port** — `<your-github-username>`.
+- **Web port** — `Suleiman700`.
